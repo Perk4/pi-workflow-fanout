@@ -1,0 +1,9 @@
+{
+  "name": "pi-workflow-fanout",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/workflow.test.js fixture/clamp.test.js",
+    "workflow": "node run.js"
+  }
+}
