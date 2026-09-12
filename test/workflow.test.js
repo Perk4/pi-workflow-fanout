@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,4 +58,14 @@ test("rejected checkpoint skips summary", async () => {
       .length,
     0,
   );
+});
+
+test("importing run.js without file argv does not throw", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["-e", "import('./run.js')"],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
 });

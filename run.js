@@ -69,7 +69,8 @@ async function main() {
   return runWorkflow({ source, cwd: root, decision });
 }
 
-if (import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(resolve(entry)).href) {
   const result = await main();
   console.log(JSON.stringify(result, null, 2));
   process.exit(result.value?.ok === false ? 1 : 0);
