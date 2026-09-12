@@ -4,7 +4,7 @@
 
 A readable four-step [pi-extensible-workflows](https://github.com/vekexasia/pi-extensible-workflows) script. Not a product.
 
-Pinned runtime: `pi-extensible-workflows@5.14.0`. Context: Andrea Baccega’s [Pi Extensible Workflows: Full Guide](https://www.youtube.com/watch?v=qAiivspEHmU).
+Pinned runtime: `pi-extensible-workflows@5.14.0` (Node **>=22.19.0**, same floor as that package). Context: Andrea Baccega’s [Pi Extensible Workflows: Full Guide](https://www.youtube.com/watch?v=qAiivspEHmU).
 
 ## Four primitives
 
@@ -31,16 +31,13 @@ Live Clamp Coach path (implement + tests fan-out call a real LLM). Credentials v
 
 ```sh
 cp .env.example .env.local
-# set OPENAI_API_KEY, or ANTHROPIC_API_KEY, or PI_COACH_API_KEY
-export OPENAI_API_KEY=...          # required unless using another provider above
-# export OPENAI_BASE_URL=https://api.openai.com/v1
-# export PI_COACH_MODEL=gpt-4.1-mini
-node run.js --live                 # TTY: type approved or rejected at the checkpoint
+# fill OPENAI_API_KEY, or ANTHROPIC_API_KEY, or PI_COACH_API_KEY in .env.local
+node run.js --live                 # loads .env.local; TTY: type approved or rejected
 node run.js --live --approve       # non-interactive approve
 node run.js --live --reject        # non-interactive reject
 ```
 
-`node run.js` without `--stub` uses the live path when a key is present, otherwise stubs. Optional `OPENAI_BASE_URL` is an OpenAI-compatible relay. Anthropic uses `ANTHROPIC_API_KEY` and `PI_COACH_MODEL`.
+`run.js` loads `.env.local` from the repo root (does not override vars already set in the shell). You can still `export OPENAI_API_KEY=...` instead of using a file. `node run.js` without `--stub` uses the live path when a key is present, otherwise stubs. Optional `OPENAI_BASE_URL` is an OpenAI-compatible relay. Anthropic stays Anthropic when `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `PI_COACH_PROVIDER=anthropic`, or a `claude*` model is set — including when the key is `PI_COACH_API_KEY`.
 
 Pi-native launch (agents with Pi tools) is the same `workflow.js`:
 
@@ -53,6 +50,7 @@ pi install npm:pi-extensible-workflows@5.14.0
 
 ```sh
 npm test
+npm run check:live
 ```
 
-That runs the fixture tests and checks that the graph order is implement+tests → gate → checkpoint → summary on the pinned worker.
+`npm test` runs fixture tests and graph-order coverage on the pinned worker. `npm run check:live` runs `node run.js --live --approve`, writes sanitized evidence to `evidence/ac3-live.json`, and **fails closed (exit 2)** if `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `PI_COACH_API_KEY` are all missing.

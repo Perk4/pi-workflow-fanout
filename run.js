@@ -4,6 +4,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PINNED_WORKFLOW_ENGINE = "pi-extensible-workflows@5.14.0";
+export const REQUIRED_LIVE_KEYS = [
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "PI_COACH_API_KEY",
+];
 const LIVE_TIMEOUT_MS = 60_000;
 
 let enginePromise;
@@ -20,16 +25,66 @@ export async function loadPinnedWorkflowEngine() {
   return enginePromise;
 }
 
+export function parseEnvFile(text) {
+  const parsed = {};
+  if (typeof text !== "string") return parsed;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (!key || value === "") continue;
+    parsed[key] = value;
+  }
+  return parsed;
+}
+
+export function applyEnvFile(env, parsed) {
+  if (!env || typeof env !== "object") {
+    throw new Error("applyEnvFile requires an env object");
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("applyEnvFile requires parsed env values");
+  }
+  for (const [key, value] of Object.entries(parsed)) {
+    if (env[key] === undefined || env[key] === "") env[key] = value;
+  }
+  return env;
+}
+
+export async function loadLocalEnvFile(root, env = process.env) {
+  if (typeof root !== "string" || !root) {
+    throw new Error("loadLocalEnvFile requires a directory");
+  }
+  try {
+    const text = await readFile(join(root, ".env.local"), "utf8");
+    return applyEnvFile(env, parseEnvFile(text));
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return env;
+    throw error;
+  }
+}
+
 export function credentialsFromEnv(env = process.env) {
   const apiKey =
     env.PI_COACH_API_KEY || env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY || "";
   if (!apiKey) return null;
 
-  if (env.ANTHROPIC_API_KEY && !env.PI_COACH_API_KEY && !env.OPENAI_API_KEY) {
+  if (preferAnthropic(env)) {
     return {
       kind: "anthropic",
-      apiKey: env.ANTHROPIC_API_KEY,
-      baseUrl: trimSlash(env.PI_COACH_BASE_URL || env.ANTHROPIC_BASE_URL || "https://api.anthropic.com"),
+      apiKey: env.PI_COACH_API_KEY || env.ANTHROPIC_API_KEY,
+      baseUrl: trimSlash(
+        env.PI_COACH_BASE_URL || env.ANTHROPIC_BASE_URL || "https://api.anthropic.com",
+      ),
       model: env.PI_COACH_MODEL || env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
     };
   }
@@ -42,6 +97,14 @@ export function credentialsFromEnv(env = process.env) {
     ),
     model: env.PI_COACH_MODEL || env.OPENAI_MODEL || "gpt-4.1-mini",
   };
+}
+
+function preferAnthropic(env) {
+  if (env.PI_COACH_PROVIDER === "anthropic") return true;
+  if (env.PI_COACH_PROVIDER === "openai") return false;
+  if (env.OPENAI_API_KEY) return false;
+  const model = env.PI_COACH_MODEL || env.ANTHROPIC_MODEL || "";
+  return Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_BASE_URL) || model.startsWith("claude");
 }
 
 export async function runWorkflow({
@@ -298,6 +361,7 @@ async function main() {
   const root = dirname(fileURLToPath(import.meta.url));
   const source = await readFile(join(root, "workflow.js"), "utf8");
   const flags = parseArgs(process.argv.slice(2));
+  await loadLocalEnvFile(root, process.env);
   const credentials = credentialsFromEnv(process.env);
   const agent = flags.stub ? "stub" : flags.live || credentials ? "live" : "stub";
   if (flags.live && !credentials) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -8,7 +9,9 @@ import { inspectWorkflowScript } from "pi-extensible-workflows/validation";
 import {
   PINNED_WORKFLOW_ENGINE,
   credentialsFromEnv,
+  loadLocalEnvFile,
   loadPinnedWorkflowEngine,
+  parseEnvFile,
   pinnedWorkflowEngineUrl,
   runWorkflow,
 } from "../run.js";
@@ -216,6 +219,33 @@ test("credentialsFromEnv prefers explicit PI_COACH_API_KEY", () => {
   });
 });
 
+test("credentialsFromEnv keeps Anthropic when override key is set", () => {
+  const creds = credentialsFromEnv({
+    PI_COACH_API_KEY: "perk-key",
+    ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+    PI_COACH_MODEL: "claude-sonnet-4-5",
+  });
+  assert.equal(creds.kind, "anthropic");
+  assert.equal(creds.apiKey, "perk-key");
+  assert.equal(creds.baseUrl, "https://api.anthropic.com");
+  assert.equal(creds.model, "claude-sonnet-4-5");
+});
+
+test("loadLocalEnvFile reads .env.local without overriding set vars", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "clamp-coach-"));
+  await writeFile(
+    join(dir, ".env.local"),
+    "OPENAI_API_KEY=from-file\nEXISTING=file-value\n# comment\nEMPTY=\n",
+  );
+  const parsed = parseEnvFile("OPENAI_API_KEY=from-file\nEMPTY=\n");
+  assert.equal(parsed.OPENAI_API_KEY, "from-file");
+  assert.equal(parsed.EMPTY, undefined);
+  const env = { EXISTING: "already" };
+  await loadLocalEnvFile(dir, env);
+  assert.equal(env.OPENAI_API_KEY, "from-file");
+  assert.equal(env.EXISTING, "already");
+});
+
 test("importing run.js without file argv does not throw", () => {
   const result = spawnSync(
     process.execPath,
@@ -246,4 +276,23 @@ test("CLI stub path still auto-approves on non-TTY", () => {
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.value.ok, true);
   assert.equal(parsed.engine, PINNED_WORKFLOW_ENGINE);
+});
+
+test("check:live fails closed without credentials", () => {
+  const result = spawnSync(process.execPath, ["scripts/check-live.js"], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH ?? "",
+      LIVE_EVIDENCE_DIR: join(tmpdir(), "clamp-coach-live-evidence"),
+    },
+  });
+  assert.equal(result.status, 2, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.ac3, "blocked");
+  assert.deepEqual(parsed.missing, [
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "PI_COACH_API_KEY",
+  ]);
 });
