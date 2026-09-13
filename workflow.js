@@ -1,5 +1,5 @@
-// Four primitives from pi-extensible-workflows.
-// Sandboxed JS: no imports. Globals are injected by Pi (or run.js in this repo).
+// Clamp Coach: one named Pi coach use-case on the four-step graph.
+// Sandboxed JS: no imports. Globals are injected by pi-extensible-workflows.
 
 // 1. Fan out two agents: implement vs write tests.
 const fanout = await parallel("implement-and-test", {
@@ -22,7 +22,7 @@ if (gate.exitCode !== 0) {
 // 3. Checkpoint: pause for human approve / reject.
 const decision = await checkpoint({
   name: "approve",
-  prompt: "Tests passed. Approve the fan-out?",
+  prompt: "Tests passed. Approve the Clamp Coach fan-out?",
   context: { fanout, exitCode: gate.exitCode },
 });
 if (decision !== "approved") {

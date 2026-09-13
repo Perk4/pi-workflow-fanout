@@ -4,6 +4,14 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/workflow.test.js fixture/clamp.test.js",
-    "workflow": "node run.js"
+    "workflow": "node run.js",
+    "coach": "node run.js --live --approve",
+    "check:live": "node scripts/check-live.js"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "pi-extensible-workflows": "5.14.0"
   }
 }
