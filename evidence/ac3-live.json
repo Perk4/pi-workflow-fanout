@@ -7,11 +7,18 @@
     "PI_COACH_API_KEY"
   ],
   "present": [],
-  "startedAt": "2026-09-12T23:48:34.488Z",
-  "finishedAt": "2026-09-12T23:48:34.489Z",
+  "keyPresence": {
+    "OPENAI_API_KEY": false,
+    "ANTHROPIC_API_KEY": false,
+    "PI_COACH_API_KEY": false
+  },
+  "envLocalPresent": false,
+  "startedAt": "2026-09-13T18:48:01.296Z",
+  "finishedAt": "2026-09-13T18:48:01.296Z",
   "command": "npm run check:live",
   "equivalent": "node run.js --live --approve",
   "node": "v22.14.0",
   "engine": "pi-extensible-workflows@5.14.0",
-  "injectedSecretNames": "CLOUDFLARE_API_TOKEN"
+  "injectedSecretNames": "CLOUDFLARE_API_TOKEN",
+  "allSecretNames": "CLOUDFLARE_API_TOKEN"
 }

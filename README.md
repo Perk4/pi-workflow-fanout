@@ -27,7 +27,7 @@ node run.js --stub            # auto-approves the checkpoint on non-TTY
 node run.js --stub --reject   # stop at the checkpoint
 ```
 
-Live Clamp Coach path (implement + tests fan-out call a real LLM). Credentials via env — never commit keys:
+Live Clamp Coach path (implement + tests fan-out call a real LLM). Credentials via env or a secret store — never commit keys, never paste them into chat or PR bodies:
 
 ```sh
 cp .env.example .env.local
@@ -37,7 +37,7 @@ node run.js --live --approve       # non-interactive approve
 node run.js --live --reject        # non-interactive reject
 ```
 
-`run.js` loads `.env.local` from the repo root (does not override vars already set in the shell). You can still `export OPENAI_API_KEY=...` instead of using a file. `node run.js` without `--stub` uses the live path when a key is present, otherwise stubs. Optional `OPENAI_BASE_URL` is an OpenAI-compatible relay. Anthropic stays Anthropic when `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `PI_COACH_PROVIDER=anthropic`, or a `claude*` model is set — including when the key is `PI_COACH_API_KEY`.
+See **Secrets** below. `run.js` loads `.env.local` from the repo root (does not override vars already set in the shell). You can still `export ANTHROPIC_API_KEY=...` instead of using a file. `node run.js` without `--stub` uses the live path when a key is present, otherwise stubs. Optional `OPENAI_BASE_URL` is an OpenAI-compatible relay. Anthropic stays Anthropic when `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `PI_COACH_PROVIDER=anthropic`, or a `claude*` model is set — including when the key is `PI_COACH_API_KEY`.
 
 Pi-native launch (agents with Pi tools) is the same `workflow.js`:
 
@@ -54,3 +54,22 @@ npm run check:live
 ```
 
 `npm test` runs fixture tests and graph-order coverage on the pinned worker. `npm run check:live` runs `node run.js --live --approve`, writes sanitized evidence to `evidence/ac3-live.json`, and **fails closed (exit 2)** if `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `PI_COACH_API_KEY` are all missing.
+
+## Secrets
+
+Supply **one** provider key. Never put key material in chat, issues, PR bodies, commits, logs, or `evidence/`.
+
+**Local file (gitignored):** copy `.env.example` to `.env.local` and fill `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `PI_COACH_API_KEY`. `.env` / `.env.local` are in `.gitignore`.
+
+**Shell env:** `export ANTHROPIC_API_KEY=...` in the process that runs `check:live`. Already-set env vars win over `.env.local`.
+
+**Cursor Cloud Agents:** add the same name in the Cloud Agents **Secrets** dashboard for this workspace/team as a **Runtime Secret** (or Environment Variable). Cursor injects it as an env var when a **new** agent starts. Existing VMs do not pick up newly added secrets. A Build Secret is not visible at runtime and will not clear AC3.
+
+Confirm presence without echoing the value:
+
+```sh
+[ -n "$ANTHROPIC_API_KEY" ] && echo present || echo missing
+npm run check:live
+```
+
+Passed evidence (`evidence/ac3-live.json`) records exit status, provider kind, model, implement+tests+summary labels, gate exit, checkpoint, and a redacted summary preview — never the key. See `evidence/README.md`.

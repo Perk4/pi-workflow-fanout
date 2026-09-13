@@ -295,4 +295,10 @@ test("check:live fails closed without credentials", () => {
     "ANTHROPIC_API_KEY",
     "PI_COACH_API_KEY",
   ]);
+  assert.deepEqual(parsed.keyPresence, {
+    OPENAI_API_KEY: false,
+    ANTHROPIC_API_KEY: false,
+    PI_COACH_API_KEY: false,
+  });
+  assert.equal(parsed.envLocalPresent, false);
 });

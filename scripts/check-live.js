@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,8 +34,22 @@ async function writeEvidence(report) {
   return path;
 }
 
+function keyPresence(env = process.env) {
+  return Object.fromEntries(
+    REQUIRED_LIVE_KEYS.map((name) => [name, Boolean(env[name])]),
+  );
+}
+
+function secretNameLists(env = process.env) {
+  return {
+    injectedSecretNames: env.CLOUD_AGENT_INJECTED_SECRET_NAMES || "",
+    allSecretNames: env.CLOUD_AGENT_ALL_SECRET_NAMES || "",
+  };
+}
+
 async function main() {
   const startedAt = new Date().toISOString();
+  const envLocalPresent = existsSync(join(root, ".env.local"));
   await loadLocalEnvFile(root, process.env);
   const present = REQUIRED_LIVE_KEYS.filter((name) => Boolean(process.env[name]));
   const credentials = credentialsFromEnv(process.env);
@@ -45,13 +60,15 @@ async function main() {
       reason: "missing live LLM credentials",
       missing: REQUIRED_LIVE_KEYS,
       present,
+      keyPresence: keyPresence(process.env),
+      envLocalPresent,
       startedAt,
       finishedAt: new Date().toISOString(),
       command: "npm run check:live",
       equivalent: "node run.js --live --approve",
       node: process.version,
       engine: PINNED_WORKFLOW_ENGINE,
-      injectedSecretNames: process.env.CLOUD_AGENT_INJECTED_SECRET_NAMES || "",
+      ...secretNameLists(process.env),
     };
     const path = await writeEvidence(report);
     console.log(JSON.stringify(report, null, 2));
@@ -85,6 +102,9 @@ async function main() {
     model: credentials.model,
     host: credentials.baseUrl,
     present: REQUIRED_LIVE_KEYS.filter((name) => Boolean(process.env[name])),
+    keyPresence: keyPresence(process.env),
+    envLocalPresent,
+    ...secretNameLists(process.env),
     agents: agentLabels,
     gateExitCode: gate?.exitCode ?? null,
     checkpoint: checkpoint?.decision ?? null,
