@@ -68,6 +68,7 @@ async function main() {
       equivalent: "node run.js --live --approve",
       node: process.version,
       engine: PINNED_WORKFLOW_ENGINE,
+      checkLiveExitCode: 2,
       ...secretNameLists(process.env),
     };
     const path = await writeEvidence(report);
@@ -108,6 +109,7 @@ async function main() {
     agents: agentLabels,
     gateExitCode: gate?.exitCode ?? null,
     checkpoint: checkpoint?.decision ?? null,
+    checkLiveExitCode: value?.ok === true ? 0 : 1,
     ok: Boolean(value?.ok),
     summaryPreview: clip(value?.summary ?? ""),
     fanoutPreview: {
