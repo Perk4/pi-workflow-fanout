@@ -9,7 +9,13 @@ export const REQUIRED_LIVE_KEYS = [
   "ANTHROPIC_API_KEY",
   "PI_COACH_API_KEY",
 ];
+export const LM_STUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1";
+export const LOCAL_DUMMY_API_KEY = "lm-studio";
+export const LOCAL_DEFAULT_MODEL = "local-model";
+export const LIVE_CREDENTIALS_ERROR =
+  "Clamp Coach live path needs OPENAI_API_KEY, ANTHROPIC_API_KEY, or PI_COACH_API_KEY (or set PI_COACH_PROVIDER=local for LM Studio)";
 const LIVE_TIMEOUT_MS = 60_000;
+const LOCAL_PROBE_TIMEOUT_MS = 5_000;
 
 let enginePromise;
 
@@ -73,7 +79,46 @@ export async function loadLocalEnvFile(root, env = process.env) {
   }
 }
 
+export function localProviderName(env = process.env) {
+  return String(env.PI_COACH_PROVIDER || "")
+    .trim()
+    .toLowerCase();
+}
+
+export function isLocalProvider(env = process.env) {
+  const provider = localProviderName(env);
+  if (provider === "local" || provider === "lmstudio" || provider === "lm-studio") {
+    return true;
+  }
+  if (provider === "anthropic" || provider === "openai") return false;
+  const baseUrl = env.PI_COACH_BASE_URL || env.OPENAI_BASE_URL || "";
+  const hasCloudKey = Boolean(
+    env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY || env.PI_COACH_API_KEY,
+  );
+  return Boolean(baseUrl) && isLoopbackHttpUrl(baseUrl) && !hasCloudKey;
+}
+
+export function envWithLocalProvider(env = process.env) {
+  if (!env || typeof env !== "object") {
+    throw new Error("envWithLocalProvider requires an env object");
+  }
+  if (isLocalProvider(env) && localProviderName(env)) return env;
+  return { ...env, PI_COACH_PROVIDER: "local" };
+}
+
 export function credentialsFromEnv(env = process.env) {
+  if (isLocalProvider(env)) {
+    return {
+      kind: "local",
+      apiKey: env.PI_COACH_API_KEY || env.OPENAI_API_KEY || LOCAL_DUMMY_API_KEY,
+      baseUrl: normalizeOpenAICompatibleBaseUrl(
+        env.PI_COACH_BASE_URL || env.OPENAI_BASE_URL || LM_STUDIO_DEFAULT_BASE_URL,
+      ),
+      model:
+        env.PI_COACH_MODEL || env.OPENAI_MODEL || env.LM_STUDIO_MODEL || LOCAL_DEFAULT_MODEL,
+    };
+  }
+
   const apiKey =
     env.PI_COACH_API_KEY || env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY || "";
   if (!apiKey) return null;
@@ -92,11 +137,93 @@ export function credentialsFromEnv(env = process.env) {
   return {
     kind: "openai",
     apiKey,
-    baseUrl: trimSlash(
+    baseUrl: normalizeOpenAICompatibleBaseUrl(
       env.PI_COACH_BASE_URL || env.OPENAI_BASE_URL || "https://api.openai.com/v1",
     ),
     model: env.PI_COACH_MODEL || env.OPENAI_MODEL || "gpt-4.1-mini",
   };
+}
+
+export function localProviderUnavailableMessage(baseUrl) {
+  const host = trimSlash(baseUrl || LM_STUDIO_DEFAULT_BASE_URL);
+  return `Local OpenAI-compatible provider is not reachable at ${host}. Start LM Studio, load a model, and enable the local server (default ${LM_STUDIO_DEFAULT_BASE_URL}). See README "Local LM Studio".`;
+}
+
+export function isUnreachableError(error) {
+  if (!error || typeof error !== "object") return false;
+  const cause = "cause" in error && error.cause && typeof error.cause === "object" ? error.cause : null;
+  const code = error.code || cause?.code || "";
+  if (
+    code === "ECONNREFUSED" ||
+    code === "ENOTFOUND" ||
+    code === "ECONNRESET" ||
+    code === "ETIMEDOUT" ||
+    code === "EHOSTUNREACH" ||
+    code === "UND_ERR_CONNECT_TIMEOUT" ||
+    code === "UND_ERR_SOCKET"
+  ) {
+    return true;
+  }
+  const name = error.name || "";
+  if (name === "TimeoutError" || name === "AbortError") return true;
+  const message = String(error.message || "");
+  return /fetch failed|ECONNREFUSED|not reachable|network/i.test(message);
+}
+
+export async function probeLocalProvider({
+  baseUrl,
+  fetchImpl = globalThis.fetch,
+  signal,
+} = {}) {
+  if (typeof baseUrl !== "string" || !baseUrl) {
+    throw new Error("probeLocalProvider requires a baseUrl");
+  }
+  if (typeof fetchImpl !== "function") {
+    throw new Error("probeLocalProvider needs fetch()");
+  }
+
+  const url = `${normalizeOpenAICompatibleBaseUrl(baseUrl)}/models`;
+  const timeout = AbortSignal.timeout(LOCAL_PROBE_TIMEOUT_MS);
+  const combined =
+    typeof AbortSignal.any === "function" && signal
+      ? AbortSignal.any([signal, timeout])
+      : timeout;
+  try {
+    const response = await fetchImpl(url, {
+      method: "GET",
+      headers: { authorization: `Bearer ${LOCAL_DUMMY_API_KEY}` },
+      signal: combined,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return {
+        ok: false,
+        reason: `local provider /models failed (${response.status}): ${clip(text)}`,
+        models: [],
+      };
+    }
+    const payload = parseJson(text, "models");
+    const models =
+      payload && typeof payload === "object" && Array.isArray(payload.data)
+        ? payload.data
+            .map((entry) => (entry && typeof entry.id === "string" ? entry.id.trim() : ""))
+            .filter(Boolean)
+        : [];
+    return { ok: true, models, reason: null };
+  } catch (error) {
+    if (isUnreachableError(error)) {
+      return {
+        ok: false,
+        reason: localProviderUnavailableMessage(baseUrl),
+        models: [],
+      };
+    }
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+      models: [],
+    };
+  }
 }
 
 function preferAnthropic(env) {
@@ -105,6 +232,33 @@ function preferAnthropic(env) {
   if (env.OPENAI_API_KEY) return false;
   const model = env.PI_COACH_MODEL || env.ANTHROPIC_MODEL || "";
   return Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_BASE_URL) || model.startsWith("claude");
+}
+
+function isLoopbackHost(hostname) {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+}
+
+function isLoopbackHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+    return isLoopbackHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeOpenAICompatibleBaseUrl(value) {
+  const trimmed = trimSlash(String(value || ""));
+  try {
+    const parsed = new URL(trimmed);
+    if (isLoopbackHost(parsed.hostname) && (parsed.pathname === "" || parsed.pathname === "/")) {
+      return `${parsed.protocol}//${parsed.host}/v1`;
+    }
+  } catch {
+    return trimmed;
+  }
+  return trimmed;
 }
 
 export async function runWorkflow({
@@ -134,9 +288,7 @@ export async function runWorkflow({
   const engine = await loadPinnedWorkflowEngine();
   const credentials = credentialsFromEnv(env);
   if (agent === "live" && typeof completeAgent !== "function" && !credentials) {
-    throw new Error(
-      "Clamp Coach live path needs OPENAI_API_KEY, ANTHROPIC_API_KEY, or PI_COACH_API_KEY",
-    );
+    throw new Error(LIVE_CREDENTIALS_ERROR);
   }
 
   const liveComplete =
@@ -246,35 +398,41 @@ async function completeLiveAgent(promptText, options, { credentials, fetchImpl, 
 
   const label =
     typeof options.label === "string" && options.label ? options.label : "agent";
-  const body =
-    credentials.kind === "anthropic"
-      ? anthropicBody(promptText, credentials.model)
-      : openaiBody(promptText, credentials.model);
-  const url =
-    credentials.kind === "anthropic"
-      ? `${credentials.baseUrl}/v1/messages`
-      : `${credentials.baseUrl}/chat/completions`;
-  const headers =
-    credentials.kind === "anthropic"
-      ? {
-          "content-type": "application/json",
-          "x-api-key": credentials.apiKey,
-          "anthropic-version": "2023-06-01",
-        }
-      : {
-          "content-type": "application/json",
-          authorization: `Bearer ${credentials.apiKey}`,
-        };
+  const openaiCompatible = credentials.kind !== "anthropic";
+  const body = openaiCompatible
+    ? openaiBody(promptText, credentials.model)
+    : anthropicBody(promptText, credentials.model);
+  const url = openaiCompatible
+    ? `${credentials.baseUrl}/chat/completions`
+    : `${credentials.baseUrl}/v1/messages`;
+  const headers = openaiCompatible
+    ? {
+        "content-type": "application/json",
+        authorization: `Bearer ${credentials.apiKey}`,
+      }
+    : {
+        "content-type": "application/json",
+        "x-api-key": credentials.apiKey,
+        "anthropic-version": "2023-06-01",
+      };
 
   const timeout = AbortSignal.timeout(LIVE_TIMEOUT_MS);
   const combined =
     typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : timeout;
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal: combined,
-  });
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: combined,
+    });
+  } catch (error) {
+    if (credentials.kind === "local" && isUnreachableError(error)) {
+      throw new Error(localProviderUnavailableMessage(credentials.baseUrl));
+    }
+    throw error;
+  }
   const text = await response.text();
   if (!response.ok) {
     throw new Error(
@@ -283,9 +441,7 @@ async function completeLiveAgent(promptText, options, { credentials, fetchImpl, 
   }
 
   const payload = parseJson(text, label);
-  const content = credentials.kind === "anthropic"
-    ? anthropicText(payload)
-    : openaiText(payload);
+  const content = openaiCompatible ? openaiText(payload) : anthropicText(payload);
   if (!content) {
     throw new Error(`Clamp Coach live ${label} returned an empty completion`);
   }
@@ -365,14 +521,12 @@ async function main() {
   const credentials = credentialsFromEnv(process.env);
   const agent = flags.stub ? "stub" : flags.live || credentials ? "live" : "stub";
   if (flags.live && !credentials) {
-    throw new Error(
-      "Clamp Coach live path needs OPENAI_API_KEY, ANTHROPIC_API_KEY, or PI_COACH_API_KEY",
-    );
+    throw new Error(LIVE_CREDENTIALS_ERROR);
   }
   const decision = flags.reject ? "rejected" : flags.approve ? "approved" : undefined;
   if (agent === "live" && credentials) {
     process.stderr.write(
-      `Clamp Coach live path: ${credentials.kind} ${credentials.model} via ${PINNED_WORKFLOW_ENGINE}\n`,
+      `Clamp Coach live path: ${credentials.kind} ${credentials.model} at ${credentials.baseUrl} via ${PINNED_WORKFLOW_ENGINE}\n`,
     );
   }
   return runWorkflow({
