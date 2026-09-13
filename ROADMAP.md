@@ -21,14 +21,15 @@ Graduate path from the YouTube Hobby Bot teach (PR #1 merged).
 | Issue | Title | Status |
 |-------|--------|--------|
 | [#2](https://github.com/Perk4/pi-workflow-fanout/issues/2) | Wire one real Pi coach use-case on the four-step graph | done (PR #5) |
-| [#6](https://github.com/Perk4/pi-workflow-fanout/issues/6) | Local Pi providers (LM Studio / OpenAI-compatible) | proposed NOW |
+| [#6](https://github.com/Perk4/pi-workflow-fanout/issues/6) | Local Pi providers (LM Studio / OpenAI-compatible) | **NOW** |
 | [#3](https://github.com/Perk4/pi-workflow-fanout/issues/3) | Reusable workflow modules (post-v1) | queued |
 
-Proposed Builder order: **#6 → #3** (Ops recommend; awaiting CoS lock).
+Builder order: **#6 → #3**.
 
 ## NOW
 
-_Pending CoS lock._ Ops recommends [#6 Local Pi providers](https://github.com/Perk4/pi-workflow-fanout/issues/6). Builder idle until Ops assigns.
+- Issue: [#6 Local Pi providers](https://github.com/Perk4/pi-workflow-fanout/issues/6)
+- CoS locked. One open Builder PR max. Idle until Ops assigns the next issue after merge.
 
 ## Kill / park
 
