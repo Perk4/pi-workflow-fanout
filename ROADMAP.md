@@ -21,15 +21,15 @@ Graduate path from the YouTube Hobby Bot teach (PR #1 merged).
 | Issue | Title | Status |
 |-------|--------|--------|
 | [#2](https://github.com/Perk4/pi-workflow-fanout/issues/2) | Wire one real Pi coach use-case on the four-step graph | done (PR #5) |
-| [#6](https://github.com/Perk4/pi-workflow-fanout/issues/6) | Local Pi providers (LM Studio / OpenAI-compatible) | **NOW** |
-| [#3](https://github.com/Perk4/pi-workflow-fanout/issues/3) | Reusable workflow modules (post-v1) | queued |
+| [#6](https://github.com/Perk4/pi-workflow-fanout/issues/6) | Local Pi providers (LM Studio / OpenAI-compatible) | done (PR #8) |
+| [#3](https://github.com/Perk4/pi-workflow-fanout/issues/3) | Reusable workflow modules (post-v1) | **NOW** |
 
-Builder order: **#6 → #3**.
+Builder order: **#2 → #6 → #3** (locked).
 
 ## NOW
 
-- Issue: [#6 Local Pi providers](https://github.com/Perk4/pi-workflow-fanout/issues/6)
-- CoS locked. One open Builder PR max. Idle until Ops assigns the next issue after merge.
+- Issue: [#3 Reusable workflow modules](https://github.com/Perk4/pi-workflow-fanout/issues/3)
+- CoS/Perk locked. One open Builder PR max.
 
 ## Kill / park
 
@@ -40,3 +40,5 @@ Archive if Pi is abandoned or this clearly overlaps another harness we already s
 - Four-primitive teach: PR #1 MERGED.
 - ROADMAP initial: PR #4 MERGED.
 - Coach use-case: PR #5 MERGED (#2 closed).
+- ROADMAP #6 NOW: PR #7 MERGED.
+- Local providers: PR #8 MERGED (#6 closed).
