@@ -54,10 +54,13 @@ async function main() {
   const present = REQUIRED_LIVE_KEYS.filter((name) => Boolean(process.env[name]));
   const credentials = credentialsFromEnv(process.env);
 
-  if (!credentials) {
+  const localOnly = credentials?.kind === "local";
+  if (!credentials || localOnly) {
     const report = {
       ac3: "blocked",
-      reason: "missing live LLM credentials",
+      reason: localOnly
+        ? "local OpenAI-compatible provider configured; use npm run check:local"
+        : "missing live LLM credentials",
       missing: REQUIRED_LIVE_KEYS,
       present,
       keyPresence: keyPresence(process.env),
@@ -73,7 +76,11 @@ async function main() {
     };
     const path = await writeEvidence(report);
     console.log(JSON.stringify(report, null, 2));
-    console.error(`AC3 blocked: missing ${REQUIRED_LIVE_KEYS.join(" / ")}. Wrote ${path}`);
+    console.error(
+      localOnly
+        ? `AC3 blocked: local provider configured; use npm run check:local. Wrote ${path}`
+        : `AC3 blocked: missing ${REQUIRED_LIVE_KEYS.join(" / ")}. Wrote ${path}`,
+    );
     process.exit(2);
   }
 
