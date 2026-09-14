@@ -110,7 +110,7 @@ export function credentialsFromEnv(env = process.env) {
   if (isLocalProvider(env)) {
     return {
       kind: "local",
-      apiKey: env.PI_COACH_API_KEY || env.OPENAI_API_KEY || LOCAL_DUMMY_API_KEY,
+      apiKey: localApiKey(env),
       baseUrl: normalizeOpenAICompatibleBaseUrl(
         env.PI_COACH_BASE_URL || env.OPENAI_BASE_URL || LM_STUDIO_DEFAULT_BASE_URL,
       ),
@@ -172,6 +172,7 @@ export function isUnreachableError(error) {
 
 export async function probeLocalProvider({
   baseUrl,
+  apiKey,
   fetchImpl = globalThis.fetch,
   signal,
 } = {}) {
@@ -188,10 +189,11 @@ export async function probeLocalProvider({
     typeof AbortSignal.any === "function" && signal
       ? AbortSignal.any([signal, timeout])
       : timeout;
+  const bearer = typeof apiKey === "string" && apiKey ? apiKey : LOCAL_DUMMY_API_KEY;
   try {
     const response = await fetchImpl(url, {
       method: "GET",
-      headers: { authorization: `Bearer ${LOCAL_DUMMY_API_KEY}` },
+      headers: { authorization: `Bearer ${bearer}` },
       signal: combined,
     });
     const text = await response.text();
@@ -234,8 +236,17 @@ function preferAnthropic(env) {
   return Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_BASE_URL) || model.startsWith("claude");
 }
 
+function localApiKey(env) {
+  return env.PI_COACH_API_KEY || LOCAL_DUMMY_API_KEY;
+}
+
 function isLoopbackHost(hostname) {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+  return (
+    hostname === "127.0.0.1" ||
+    hostname === "localhost" ||
+    hostname === "::1" ||
+    hostname === "[::1]"
+  );
 }
 
 function isLoopbackHttpUrl(value) {

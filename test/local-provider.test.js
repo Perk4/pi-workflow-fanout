@@ -25,8 +25,17 @@ const source = await readFile(join(root, "workflow.js"), "utf8");
 function startOpenAICompatibleServer({
   modelId = "mock-local-model",
   completion = "ok-local",
+  requiredApiKey,
 } = {}) {
   const server = http.createServer((req, res) => {
+    if (requiredApiKey) {
+      const authorization = req.headers.authorization || "";
+      if (authorization !== `Bearer ${requiredApiKey}`) {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "Unauthorized" } }));
+        return;
+      }
+    }
     if (req.method === "GET" && req.url === "/v1/models") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ data: [{ id: modelId }] }));
@@ -114,13 +123,51 @@ test("credentialsFromEnv openai provider still requires a key", () => {
   assert.equal(credentialsFromEnv({}), null);
 });
 
+test("credentialsFromEnv local ignores exported cloud keys for Bearer", () => {
+  const creds = credentialsFromEnv({
+    PI_COACH_PROVIDER: "local",
+    OPENAI_API_KEY: "sk-cloud-must-not-be-sent",
+    ANTHROPIC_API_KEY: "sk-anthropic-must-not-be-sent",
+  });
+  assert.equal(creds.kind, "local");
+  assert.equal(creds.apiKey, LOCAL_DUMMY_API_KEY);
+});
+
+test("credentialsFromEnv local uses PI_COACH_API_KEY even when OPENAI_API_KEY is set", () => {
+  const creds = credentialsFromEnv({
+    PI_COACH_PROVIDER: "local",
+    PI_COACH_API_KEY: "local-secret",
+    OPENAI_API_KEY: "sk-cloud-must-not-be-sent",
+  });
+  assert.equal(creds.kind, "local");
+  assert.equal(creds.apiKey, "local-secret");
+});
+
+test("credentialsFromEnv treats bracketed IPv6 loopback as local and normalizes /v1", () => {
+  const inferred = credentialsFromEnv({
+    OPENAI_BASE_URL: "http://[::1]:1234",
+  });
+  assert.equal(inferred.kind, "local");
+  assert.equal(inferred.baseUrl, "http://[::1]:1234/v1");
+  assert.equal(inferred.apiKey, LOCAL_DUMMY_API_KEY);
+
+  const explicit = credentialsFromEnv({
+    PI_COACH_PROVIDER: "local",
+    OPENAI_BASE_URL: "http://[::1]:1234",
+  });
+  assert.equal(explicit.kind, "local");
+  assert.equal(explicit.baseUrl, "http://[::1]:1234/v1");
+});
+
 test("envWithLocalProvider forces local even when a cloud key is present", () => {
   const env = envWithLocalProvider({
     ANTHROPIC_API_KEY: "cloud-key",
     PI_COACH_MODEL: "claude-sonnet-4-5",
   });
   assert.equal(env.PI_COACH_PROVIDER, "local");
-  assert.equal(credentialsFromEnv(env).kind, "local");
+  const creds = credentialsFromEnv(env);
+  assert.equal(creds.kind, "local");
+  assert.equal(creds.apiKey, LOCAL_DUMMY_API_KEY);
 });
 
 test("live local path uses dummy Bearer key against OpenAI-compatible completions", async () => {
@@ -134,6 +181,8 @@ test("live local path uses dummy Bearer key against OpenAI-compatible completion
       PI_COACH_PROVIDER: "local",
       PI_COACH_BASE_URL: "http://127.0.0.1:1234/v1",
       PI_COACH_MODEL: "mock-local-model",
+      OPENAI_API_KEY: "sk-cloud-must-not-be-sent",
+      ANTHROPIC_API_KEY: "sk-anthropic-must-not-be-sent",
     },
     fetchImpl: async (url, init) => {
       requests.push({ url, init });
@@ -205,6 +254,47 @@ test("probeLocalProvider reports models from a running local server", async () =
     const probe = await probeLocalProvider({ baseUrl: local.baseUrl });
     assert.equal(probe.ok, true);
     assert.deepEqual(probe.models, ["listed-model"]);
+  } finally {
+    await local.close();
+  }
+});
+
+test("probeLocalProvider sends the configured local key, not a hardcoded dummy", async () => {
+  let authorization = null;
+  const probe = await probeLocalProvider({
+    baseUrl: "http://127.0.0.1:1234/v1",
+    apiKey: "local-secret",
+    fetchImpl: async (_url, init) => {
+      authorization = init.headers.authorization;
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({ data: [{ id: "listed-model" }] });
+        },
+      };
+    },
+  });
+  assert.equal(probe.ok, true);
+  assert.equal(authorization, "Bearer local-secret");
+});
+
+test("probeLocalProvider authenticates against a local endpoint that requires PI_COACH_API_KEY", async () => {
+  const local = await startOpenAICompatibleServer({
+    modelId: "listed-model",
+    requiredApiKey: "local-secret",
+  });
+  try {
+    const denied = await probeLocalProvider({ baseUrl: local.baseUrl });
+    assert.equal(denied.ok, false);
+    assert.match(denied.reason, /401/);
+
+    const allowed = await probeLocalProvider({
+      baseUrl: local.baseUrl,
+      apiKey: "local-secret",
+    });
+    assert.equal(allowed.ok, true);
+    assert.deepEqual(allowed.models, ["listed-model"]);
   } finally {
     await local.close();
   }
@@ -299,6 +389,37 @@ test("check:local passes against an equivalent local OpenAI-compatible server", 
     assert.equal(report.model, "mock-local-model");
     assert.equal(report.ok, true);
     assert.deepEqual(report.agents.sort(), ["implement", "summary", "tests"]);
+  } finally {
+    await local.close();
+  }
+});
+
+test("check:local uses PI_COACH_API_KEY for the /models probe on authenticated endpoints", async () => {
+  const local = await startOpenAICompatibleServer({
+    requiredApiKey: "local-secret",
+  });
+  try {
+    const blocked = await runLocalCheck({
+      env: {
+        PI_COACH_BASE_URL: local.baseUrl,
+        OPENAI_API_KEY: "sk-cloud-must-not-be-sent",
+      },
+      cwd: root,
+    });
+    assert.equal(blocked.exitCode, 2);
+    assert.equal(blocked.report.local, "blocked");
+    assert.match(blocked.report.reason, /401/);
+
+    const { report, exitCode } = await runLocalCheck({
+      env: {
+        PI_COACH_BASE_URL: local.baseUrl,
+        PI_COACH_API_KEY: "local-secret",
+        OPENAI_API_KEY: "sk-cloud-must-not-be-sent",
+      },
+      cwd: root,
+    });
+    assert.equal(exitCode, 0, report.reason);
+    assert.equal(report.local, "passed");
   } finally {
     await local.close();
   }

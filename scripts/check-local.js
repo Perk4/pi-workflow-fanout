@@ -84,6 +84,7 @@ export async function runLocalCheck({
 
   const probe = await probeLocalProvider({
     baseUrl: credentials.baseUrl,
+    apiKey: credentials.apiKey,
     fetchImpl,
   });
   if (!probe.ok) {
