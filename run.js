@@ -2,6 +2,13 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { fanoutFromWorkflowSource } from "./lib/fourStep.js";
+import {
+  DEFAULT_PATTERN_ID,
+  getPattern,
+  listPatternIds,
+  workflowFileForPattern,
+} from "./lib/patterns.js";
 
 export const PINNED_WORKFLOW_ENGINE = "pi-extensible-workflows@5.14.0";
 export const REQUIRED_LIVE_KEYS = [
@@ -282,6 +289,7 @@ export async function runWorkflow({
   stdin = process.stdin,
   stdout = process.stderr,
   fetchImpl = globalThis.fetch,
+  systemPrompt,
 } = {}) {
   if (typeof source !== "string") {
     throw new Error("runWorkflow requires workflow source text");
@@ -295,6 +303,9 @@ export async function runWorkflow({
   if (decision !== undefined && decision !== "approved" && decision !== "rejected") {
     throw new Error('runWorkflow decision must be "approved" or "rejected"');
   }
+  if (systemPrompt !== undefined && (typeof systemPrompt !== "string" || !systemPrompt.trim())) {
+    throw new Error("runWorkflow systemPrompt must be a nonempty string when set");
+  }
 
   const engine = await loadPinnedWorkflowEngine();
   const credentials = credentialsFromEnv(env);
@@ -302,6 +313,7 @@ export async function runWorkflow({
     throw new Error(LIVE_CREDENTIALS_ERROR);
   }
 
+  const liveSystemPrompt = systemPrompt ?? getPattern(DEFAULT_PATTERN_ID).systemPrompt;
   const liveComplete =
     typeof completeAgent === "function"
       ? completeAgent
@@ -311,9 +323,11 @@ export async function runWorkflow({
               credentials,
               fetchImpl,
               signal,
+              systemPrompt: liveSystemPrompt,
             })
         : null;
 
+  const fanout = fanoutFromWorkflowSource(source);
   const trace = [];
   const execution = engine.runWorkflow(source, null, {
     async agent(promptText, options, signal) {
@@ -326,7 +340,7 @@ export async function runWorkflow({
       return `[stub:${label}] ${String(promptText)}`;
     },
     async shell(command, options, signal) {
-      recordParallelIfReady(trace);
+      recordParallelIfReady(trace, fanout);
       const result = await engine.executeShellCommand(
         command,
         options ?? {},
@@ -342,7 +356,7 @@ export async function runWorkflow({
       };
     },
     async checkpoint(input) {
-      recordParallelIfReady(trace);
+      recordParallelIfReady(trace, fanout);
       const resolved = await resolveCheckpoint(input, {
         decision,
         stdin,
@@ -358,20 +372,23 @@ export async function runWorkflow({
   });
 
   const value = await execution.result;
-  recordParallelIfReady(trace);
+  recordParallelIfReady(trace, fanout);
   return { value, trace, engine: PINNED_WORKFLOW_ENGINE };
 }
 
-function recordParallelIfReady(trace) {
-  const hasImplement = trace.some(
-    (step) => step.kind === "agent" && step.label === "implement",
-  );
-  const hasTests = trace.some(
-    (step) => step.kind === "agent" && step.label === "tests",
+function recordParallelIfReady(trace, fanout) {
+  if (!fanout || !Array.isArray(fanout.labels) || fanout.labels.length < 2) {
+    return;
+  }
+  if (typeof fanout.parallelName !== "string" || !fanout.parallelName) {
+    return;
+  }
+  const hasAll = fanout.labels.every((label) =>
+    trace.some((step) => step.kind === "agent" && step.label === label),
   );
   const hasParallel = trace.some((step) => step.kind === "parallel");
-  if (hasImplement && hasTests && !hasParallel) {
-    trace.push({ kind: "parallel", name: "implement-and-test" });
+  if (hasAll && !hasParallel) {
+    trace.push({ kind: "parallel", name: fanout.parallelName });
   }
 }
 
@@ -402,17 +419,24 @@ async function resolveCheckpoint(input, { decision, stdin, stdout }) {
   }
 }
 
-async function completeLiveAgent(promptText, options, { credentials, fetchImpl, signal }) {
+async function completeLiveAgent(
+  promptText,
+  options,
+  { credentials, fetchImpl, signal, systemPrompt },
+) {
   if (typeof fetchImpl !== "function") {
     throw new Error("Clamp Coach live path needs fetch()");
+  }
+  if (typeof systemPrompt !== "string" || !systemPrompt.trim()) {
+    throw new Error("completeLiveAgent requires a systemPrompt");
   }
 
   const label =
     typeof options.label === "string" && options.label ? options.label : "agent";
   const openaiCompatible = credentials.kind !== "anthropic";
   const body = openaiCompatible
-    ? openaiBody(promptText, credentials.model)
-    : anthropicBody(promptText, credentials.model);
+    ? openaiBody(promptText, credentials.model, systemPrompt)
+    : anthropicBody(promptText, credentials.model, systemPrompt);
   const url = openaiCompatible
     ? `${credentials.baseUrl}/chat/completions`
     : `${credentials.baseUrl}/v1/messages`;
@@ -459,26 +483,24 @@ async function completeLiveAgent(promptText, options, { credentials, fetchImpl, 
   return content;
 }
 
-function openaiBody(promptText, model) {
+function openaiBody(promptText, model, systemPrompt) {
   return {
     model,
     messages: [
       {
         role: "system",
-        content:
-          "You are Clamp Coach, a Pi workflow coach. Answer the implement, tests, or summary step in plain text.",
+        content: systemPrompt,
       },
       { role: "user", content: promptText },
     ],
   };
 }
 
-function anthropicBody(promptText, model) {
+function anthropicBody(promptText, model, systemPrompt) {
   return {
     model,
     max_tokens: 1024,
-    system:
-      "You are Clamp Coach, a Pi workflow coach. Answer the implement, tests, or summary step in plain text.",
+    system: systemPrompt,
     messages: [{ role: "user", content: promptText }],
   };
 }
@@ -511,6 +533,9 @@ function trimSlash(value) {
 }
 
 function parseArgs(argv) {
+  if (!Array.isArray(argv)) {
+    throw new Error("parseArgs requires an argv array");
+  }
   const live = argv.includes("--live");
   const stub = argv.includes("--stub");
   const reject = argv.includes("--reject");
@@ -521,13 +546,36 @@ function parseArgs(argv) {
   if (approve && reject) {
     throw new Error("Use only one of --approve or --reject");
   }
-  return { live, stub, reject, approve };
+  return { live, stub, reject, approve, pattern: parsePatternArg(argv) };
+}
+
+function parsePatternArg(argv) {
+  let pattern = DEFAULT_PATTERN_ID;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--pattern") {
+      const value = argv[i + 1];
+      if (typeof value !== "string" || !value || value.startsWith("--")) {
+        throw new Error(
+          `Missing --pattern id (${listPatternIds().join(" or ")})`,
+        );
+      }
+      pattern = value;
+      i += 1;
+      continue;
+    }
+    if (typeof arg === "string" && arg.startsWith("--pattern=")) {
+      pattern = arg.slice("--pattern=".length);
+    }
+  }
+  return getPattern(pattern).id;
 }
 
 async function main() {
   const root = dirname(fileURLToPath(import.meta.url));
-  const source = await readFile(join(root, "workflow.js"), "utf8");
   const flags = parseArgs(process.argv.slice(2));
+  const pattern = getPattern(flags.pattern);
+  const source = await readFile(workflowFileForPattern(pattern.id, root), "utf8");
   await loadLocalEnvFile(root, process.env);
   const credentials = credentialsFromEnv(process.env);
   const agent = flags.stub ? "stub" : flags.live || credentials ? "live" : "stub";
@@ -537,7 +585,7 @@ async function main() {
   const decision = flags.reject ? "rejected" : flags.approve ? "approved" : undefined;
   if (agent === "live" && credentials) {
     process.stderr.write(
-      `Clamp Coach live path: ${credentials.kind} ${credentials.model} at ${credentials.baseUrl} via ${PINNED_WORKFLOW_ENGINE}\n`,
+      `${pattern.title} live path: ${credentials.kind} ${credentials.model} at ${credentials.baseUrl} via ${PINNED_WORKFLOW_ENGINE}\n`,
     );
   }
   return runWorkflow({
@@ -546,6 +594,7 @@ async function main() {
     decision,
     agent,
     env: process.env,
+    systemPrompt: pattern.systemPrompt,
   });
 }
 

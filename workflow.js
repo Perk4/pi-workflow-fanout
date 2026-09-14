@@ -1,4 +1,5 @@
 // Clamp Coach: one named Pi coach use-case on the four-step graph.
+// Coach-specific composition of the reusable four-step skeleton (lib/fourStep.js).
 // Sandboxed JS: no imports. Globals are injected by pi-extensible-workflows.
 
 // 1. Fan out two agents: implement vs write tests.

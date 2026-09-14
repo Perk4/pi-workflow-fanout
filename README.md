@@ -2,20 +2,35 @@
 
 **Clamp Coach** independently drafts an implementation of `clamp(value, min, max)` and its tests, gates on `node --test`, pauses for a human approve/reject, then summarizes the result.
 
-A readable four-step [pi-extensible-workflows](https://github.com/vekexasia/pi-extensible-workflows) script. Not a product.
+A readable four-step [pi-extensible-workflows](https://github.com/vekexasia/pi-extensible-workflows) harness. Not a product. Clamp Coach is one composition of a reusable **fan-out → gate → checkpoint → summary** skeleton; **plan vs critique** is a second fan-out on that same graph.
 
 Pinned runtime: `pi-extensible-workflows@5.14.0` (Node **>=22.19.0**, same floor as that package). Context: Andrea Baccega’s [Pi Extensible Workflows: Full Guide](https://www.youtube.com/watch?v=qAiivspEHmU).
 
 ## Four primitives
 
-Read `workflow.js`. In order:
+Read `workflow.js` (or `lib/fourStep.js`, which emits that graph). In order:
 
-1. **Fan-out** — `parallel` runs two `agent`s: implement `clamp`, write tests.
-2. **Gate** — `shell` runs `node --test fixture/clamp.test.js`. Nonzero exit stops the run.
+1. **Fan-out** — `parallel` runs two `agent`s (Clamp Coach: implement `clamp`, write tests).
+2. **Gate** — `shell` runs a deterministic command. Nonzero exit stops the run.
 3. **Checkpoint** — pause for a human `"approved"` / `"rejected"`.
 4. **Summary** — one `agent` reports the fan-out and gate.
 
-The fixture already contains `clamp` and its tests so the gate can run without a live LLM. `run.js` executes the script on the pinned pi-extensible-workflows worker (the same sandboxed `agent` / `shell` / `checkpoint` / `parallel` runtime Pi uses). Headless `piewf run` cannot execute checkpointed workflows, so this repo hosts the worker directly instead of the Pi TUI.
+The fixture already contains `clamp` and its tests so the Clamp Coach gate can run without a live LLM. `run.js` executes the script on the pinned pi-extensible-workflows worker (the same sandboxed `agent` / `shell` / `checkpoint` / `parallel` runtime Pi uses). Headless `piewf run` cannot execute checkpointed workflows, so this repo hosts the worker directly instead of the Pi TUI.
+
+## Reusable vs coach-specific
+
+Pi sandbox scripts cannot `import`, so the module boundary is a Node helper plus pattern configs — not a published package.
+
+| Layer | What | Where |
+|-------|------|--------|
+| **Reusable skeleton** | Four-step graph: `parallel` fan-out → `shell` gate (fail closed) → `checkpoint` (reject skips summary) → summary `agent`. Host: stub / live / local providers, tracing. | `lib/fourStep.js`, `run.js` |
+| **Coach-specific** | Implement vs tests prompts, `node --test fixture/clamp.test.js`, Clamp Coach checkpoint copy and live system prompt, `fixture/clamp.js`. Pi-native `scriptPath`. | `lib/patterns.js` (`clamp-coach`), `workflow.js` |
+| **Second pattern** | Plan vs critique prompts, `node --check fixture/clamp.js` gate, different checkpoint/summary copy. Same skeleton, not implement-vs-tests. | `lib/patterns.js` (`plan-critique`), `workflows/plan-critique.js` |
+
+```sh
+node run.js --stub --pattern plan-critique
+node run.js --stub --pattern clamp-coach   # default; same as node run.js --stub
+```
 
 ## Run
 
