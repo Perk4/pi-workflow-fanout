@@ -6,7 +6,7 @@ Graduate path from the YouTube Hobby Bot teach (PR #1 merged).
 ## North star
 
 - Real [pi-extensible-workflows](https://github.com/vekexasia/pi-extensible-workflows) + live agent/LLM
-- Four-step skeleton as reusable modules; Clamp Coach as the coach-specific composition
+- Fixed four-step graph for v1; reusable modules later
 - Local OpenAI-compatible providers (LM Studio) so daily use does not require cloud keys
 - One real Pi coach use-case before package extract
 
@@ -22,14 +22,13 @@ Graduate path from the YouTube Hobby Bot teach (PR #1 merged).
 |-------|--------|--------|
 | [#2](https://github.com/Perk4/pi-workflow-fanout/issues/2) | Wire one real Pi coach use-case on the four-step graph | done (PR #5) |
 | [#6](https://github.com/Perk4/pi-workflow-fanout/issues/6) | Local Pi providers (LM Studio / OpenAI-compatible) | done (PR #8) |
-| [#3](https://github.com/Perk4/pi-workflow-fanout/issues/3) | Reusable workflow modules (post-v1) | **NOW** (done when merged) |
+| [#3](https://github.com/Perk4/pi-workflow-fanout/issues/3) | Reusable workflow modules (post-v1) | done (PR #10) |
 
-Builder order: **#6 → #3**.
+No open phase issues. Builder idle until CoS locks next NOW.
 
 ## NOW
 
-- Issue: [#3 Reusable workflow modules](https://github.com/Perk4/pi-workflow-fanout/issues/3)
-- CoS locked. Skeleton extract + plan-vs-critique fan-out. Clamp Coach stays the default composition. Done when this PR merges.
+_None._ Awaiting CoS / Perk lock (next likely: interview → roadmap for queued agents-harness, starting with `trace-rote-exec`).
 
 ## Kill / park
 
@@ -40,4 +39,6 @@ Archive if Pi is abandoned or this clearly overlaps another harness we already s
 - Four-primitive teach: PR #1 MERGED.
 - ROADMAP initial: PR #4 MERGED.
 - Coach use-case: PR #5 MERGED (#2 closed).
+- ROADMAP #6 NOW: PR #7 MERGED.
 - Local providers: PR #8 MERGED (#6 closed).
+- Modules: PR #10 MERGED (#3 closed).
